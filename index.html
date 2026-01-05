@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Blind Bubble Pop</title>
+<style>
+html,body{margin:0;padding:0;background:#000;color:#fff;font-family:system-ui,sans-serif;overflow:hidden;}
+#game{position:relative;width:100vw;height:100vh;touch-action:none;}
+.bubble{position:absolute;border-radius:50%;background:rgba(0,150,255,0.8);}
+#cursor{position:absolute;width:10px;height:10px;background:yellow;border-radius:50%;pointer-events:none;}
+#startBtn{position:absolute;top:30%;left:50%;transform:translate(-50%,-50%);font-size:1.5em;padding:1em 2em;}
+#difficultyButtons{position:absolute;top:40%;left:50%;transform:translateX(-50%);display:none;text-align:center;gap:0.5em;}
+#difficultyButtons button{font-size:1.2em;padding:0.5em 1em;margin:0.2em;}
+#instructions, #options{position:absolute;top:55%;left:50%;transform:translateX(-50%);width:90%;max-width:600px;font-size:0.95em;line-height:1.4;color:#ccc;text-align:left;}
+#speechOverlay{position:absolute;bottom:20px;width:100%;text-align:center;color:cyan;pointer-events:none;}
+#statusOverlay{position:absolute;top:10px;left:10px;color:lime;}
+details summary{cursor:pointer;outline:none;}
+</style>
+</head>
+<body>
+
+<div id="game" tabindex="0"></div>
+<div id="speechOverlay"></div>
+<div id="statusOverlay"></div>
+
+<button id="startBtn">Start Game</button>
+
+<details id="instructions">
+  <summary>Instructions</summary>
+  <div>
+    <strong>Objective:</strong> Pop as many bubbles as possible before time runs out.<br><br>
+    <strong>Starting the game:</strong> Press <strong>Start Game</strong> (mouse, tap, or <strong>Enter</strong> key).<br>
+    After that, click or tap one of the difficulty buttons that appear: Easy, Medium, or Hard.<br><br>
+    <strong>Movement and interaction:</strong> Move your pointer or finger to control the cursor. Arrow keys also work on desktop. A short tone plays when the cursor hovers over a bubble. Click, tap, or press Enter to pop a bubble.<br><br>
+    <strong>Scoring:</strong> Each popped bubble increases your score by 1.<br><br>
+    <strong>Combos:</strong> Pop 3 bubbles within the combo time window to earn extra seconds. Combo bonuses vary by difficulty.<br><br>
+    <strong>Difficulty details:</strong><br>
+    <strong>Easy:</strong> 60 seconds, 5 bubbles, large size, +1s per bubble, combo bonus +5s.<br>
+    <strong>Medium:</strong> 45 seconds, 3 bubbles, medium size, no per-bubble bonus, combo bonus +3s within 3 seconds.<br>
+    <strong>Hard:</strong> 30 seconds, 1 bubble, small size, no per-bubble bonus. If you pop 3 bubbles within the initial 30 seconds, you gain +30s (once only).
+  </div>
+</details>
+
+<details id="options">
+  <summary>Options</summary>
+  <div>
+    <label><input type="checkbox" id="toggleAudio" checked> Audio</label><br>
+    <label><input type="checkbox" id="toggleVisuals" checked> Visuals</label><br>
+    <label><input type="checkbox" id="toggleHaptics" checked> Haptics</label>
+  </div>
+</details>
+
+<div id="difficultyButtons">
+  <button onclick="startGame('easy')">Easy</button>
+  <button onclick="startGame('medium')">Medium</button>
+  <button onclick="startGame('hard')">Hard</button>
+</div>
+
+<script>
+/* -------------------- Audio -------------------- */
+const audioCtx=new(window.AudioContext||window.webkitAudioContext)();
+let audioUnlocked=false;
+function unlockAudio(){if(!audioUnlocked){audioCtx.resume();audioUnlocked=true;}}
+
+function tone(freq,dur=0.1,gain=0.25){
+  if(!audioUnlocked) return;
+  const o=audioCtx.createOscillator();
+  const g=audioCtx.createGain();
+  o.frequency.value=freq; g.gain.value=gain;
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(); o.stop(audioCtx.currentTime+dur);
+}
+
+/* -------------------- Pop Tone: Version 1 Timbre + Version 2 Envelope -------------------- */
+function decayTone(freq,dur=0.1){
+  if(!audioUnlocked) return;
+
+  // Timbre from Version 1 (“O” formant)
+  const real = new Float32Array([0, 1.2, 0.03, 0.02, 0.01]);
+  const imag = new Float32Array(real.length);
+  const wave = audioCtx.createPeriodicWave(real, imag, {disableNormalization:false});
+
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+
+  o.setPeriodicWave(wave);
+  o.frequency.value = freq;
+
+  // Envelope from Version 2 (fast attack, sudden pop)
+  g.gain.setValueAtTime(0.1, audioCtx.currentTime);
+  g.gain.linearRampToValueAtTime(0.95, audioCtx.currentTime + 0.001);
+  g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(audioCtx.currentTime);
+  o.stop(audioCtx.currentTime + dur);
+}
+
+function wallTone(freq=150, dur=0.04, gain=0.65){
+  if(!audioUnlocked) return;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = 'square';
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(gain, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start();
+  o.stop(audioCtx.currentTime + dur);
+}
+
+/* -------------------- Hover Tone With Movement Sensitivity -------------------- */
+const BUBBLE_HOVER_COOLDOWN=30;
+const hoverState = new WeakMap();
+
+function hoverTone(bubble){
+  if(!audioUnlocked) return;
+  const now = audioCtx.currentTime;
+
+  let state = hoverState.get(bubble);
+  if(!state){
+    state = {gain:0, lastMove:now};
+    hoverState.set(bubble, state);
+  }
+
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  const lfo = audioCtx.createOscillator();
+  const lfoGain = audioCtx.createGain();
+
+  o.type = 'sine';
+  o.frequency.value = 600;
+
+  lfo.type = 'sine';
+  lfo.frequency.value = 3 + Math.random()*3;
+  lfoGain.gain.value = 5;
+  lfo.connect(lfoGain);
+  lfoGain.connect(o.frequency);
+  lfo.start(now);
+  lfo.stop(now + 0.25);
+
+  const deltaTime = now - state.lastMove;
+  let targetGain = 0.12;
+  if(deltaTime < 0.05){
+    state.gain = Math.min(state.gain + 0.02, targetGain);
+  }
+
+  g.gain.setValueAtTime(0.0001, now);
+  g.gain.linearRampToValueAtTime(state.gain, now + 0.05);
+  g.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
+
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(now); o.stop(now + 0.25);
+
+  state.lastMove = now;
+  hoverState.set(bubble, state);
+}
+
+/* -------------------- Speech -------------------- */
+const speechOverlay=document.getElementById("speechOverlay");
+function speak(t,onEnd){
+  speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(t);
+  if(onEnd) u.onend=onEnd;
+  speechSynthesis.speak(u);
+  speechOverlay.textContent=t;
+}
+
+/* -------------------- Config -------------------- */
+const DIFFICULTIES={easy:{bubbles:5,time:60,size:100,spawn:2000,bonusTime:true,fieldScale:0.8},medium:{bubbles:3,time:45,size:80,spawn:3000,bonusTime:true,fieldScale:1},hard:{bubbles:1,time:30,size:50,spawn:5000,penalty:true,fieldScale:1}};
+
+/* -------------------- State -------------------- */
+const game=document.getElementById("game");
+const startBtn=document.getElementById("startBtn");
+const statusOverlay=document.getElementById("statusOverlay");
+const cursor=document.createElement("div"); cursor.id="cursor"; game.appendChild(cursor);
+const instructions=document.getElementById("instructions");
+const options=document.getElementById("options");
+const difficultyButtons=document.getElementById("difficultyButtons");
+
+let bubbles=[],score=0,timeLeft=0,difficulty;
+let timerInterval,spawnInterval;
+let hoveredBubble=null;
+let state="menu",cx=0,cy=0,lastPopTimes=[];
+let hardBonusGranted=false;
+let hardStartTime=0;
+let touchStartX=0,touchStartY=0;
+const TAP_SLOP=12;
+
+let lastEdgeTime=0;
+const EDGE_COOLDOWN=80;
+const bubbleHoverTimes=new WeakMap();
+
+function updateStatus(){statusOverlay.textContent=`Score: ${score} | Time: ${timeLeft}`;}
+function getField(){
+  const s=difficulty.fieldScale;
+  const w=innerWidth*s,h=innerHeight*s;
+  return{left:(innerWidth-w)/2,top:(innerHeight-h)/2,right:(innerWidth+w)/2,bottom:(innerHeight+h)/2};
+}
+
+startBtn.onclick=()=>{
+  unlockAudio();
+  startBtn.style.display="none";
+  instructions.style.display="block";
+  options.style.display="block";
+  difficultyButtons.style.display="block";
+  speak("Welcome! Click or tap a difficulty button to start the game.");
+};
+
+function startGame(level){
+  state="playing"; difficulty=DIFFICULTIES[level];
+  bubbles=[]; score=0; timeLeft=difficulty.time; lastPopTimes=[];
+  hardBonusGranted=false; hardStartTime=Date.now();
+  difficultyButtons.style.display="none"; instructions.style.display="none"; options.style.display="none";
+  game.innerHTML=""; game.appendChild(cursor);
+  const field=getField();
+  cx=(field.left+field.right)/2; cy=(field.top+field.bottom)/2;
+  cursor.style.left=cx+"px"; cursor.style.top=cy+"px";
+  updateStatus();
+  speak(level+" mode",()=>countdownGo(runGame));
+}
+
+function countdownGo(cb){
+  [3,2,1].forEach((n,i)=>setTimeout(()=>{tone(500);speak(String(n));},i*1000));
+  setTimeout(()=>{tone(1000);speak("Go");cb();},3000);
+}
+
+function runGame(){
+  timerInterval=setInterval(()=>{
+    timeLeft--; updateStatus();
+    if(timeLeft<=10 && timeLeft>0) tone(500);
+    if(timeLeft<=0) endGame();
+  },1000);
+  for(let i=0;i<difficulty.bubbles;i++) spawnBubble();
+  spawnInterval=setInterval(spawnBubble,difficulty.spawn);
+}
+
+function spawnBubble(){
+  if(difficulty.penalty && bubbles.length>0) return;
+  const field=getField(); const size=difficulty.size;
+  const b=document.createElement("div");
+  b.className="bubble"; b.style.width=b.style.height=size+"px";
+  b.style.left=(field.left+Math.random()*(field.right-field.left-size))+"px";
+  b.style.top=(field.top+Math.random()*(field.bottom-field.top-size))+"px";
+  game.appendChild(b); bubbles.push(b);
+}
+
+let lastTap=0,tapCount=0,tapTimer=null;
+const TAP_INTERVAL=400;
+
+game.addEventListener("pointerdown",e=>{
+  unlockAudio();
+  game.setPointerCapture(e.pointerId);
+  touchStartX=e.clientX; touchStartY=e.clientY;
+
+  if(state==="menu"){
+    const now=Date.now();
+    tapCount=(now-lastTap<TAP_INTERVAL)?tapCount+1:1;
+    lastTap=now;
+    clearTimeout(tapTimer);
+    tapTimer=setTimeout(()=>{
+      if(tapCount===1) startGame("easy");
+      else if(tapCount===2) startGame("medium");
+      else startGame("hard");
+      tapCount=0;
+    },TAP_INTERVAL+50);
+  } else if(state==="playing"){
+    for(const b of bubbles){
+      const r=b.getBoundingClientRect();
+      if(e.clientX>=r.left && e.clientX<=r.right &&
+         e.clientY>=r.top && e.clientY<=r.bottom){
+        popBubble(b); break;
+      }
+    }
+  }
+});
+
+game.addEventListener("pointermove",e=>{
+  if(state!=="playing") return;
+
+  const field=getField();
+  let nx=e.clientX, ny=e.clientY;
+  let hitBoundary=false;
+
+  if(nx<field.left){nx=field.left; hitBoundary=true;}
+  if(nx>field.right){nx=field.right; hitBoundary=true;}
+  if(ny<field.top){ny=field.top; hitBoundary=true;}
+
+  cx=nx; cy=ny;
+  cursor.style.left=cx+"px"; cursor.style.top=cy+"px";
+
+  const now=Date.now();
+
+  if(hitBoundary && now-lastEdgeTime>EDGE_COOLDOWN){
+    lastEdgeTime=now;
+    wallTone(150, 0.04, 0.65);
+    if(navigator.vibrate) navigator.vibrate(40);
+  }
+
+  hoveredBubble=null;
+  for(const b of bubbles){
+    const last=bubbleHoverTimes.get(b)||0;
+    if(now-last<BUBBLE_HOVER_COOLDOWN) continue;
+    const r=b.getBoundingClientRect();
+    if(cx>=r.left && cx<=r.right && cy>=r.top && cy<=r.bottom){
+      hoveredBubble=b;
+      bubbleHoverTimes.set(b,now);
+      hoverTone(b);
+    }
+  }
+});
+
+document.addEventListener("keydown", e=>{
+  if(state!=="playing") return;
+  const field=getField(); const step=20;
+  let nx=cx, ny=cy;
+  if(e.key==="ArrowUp") ny-=step;
+  if(e.key==="ArrowDown") ny+=step;
+  if(e.key==="ArrowLeft") nx-=step;
+  if(e.key==="ArrowRight") nx+=step;
+  if(nx<field.left||nx>field.right||ny<field.top||ny>field.bottom){wallTone(150, 0.04, 0.65); return;}
+  cx=nx; cy=ny; cursor.style.left=cx+"px"; cursor.style.top=cy+"px";
+
+  hoveredBubble=null;
+  for(const b of bubbles){ const r=b.getBoundingClientRect();
+    if(cx>=r.left && cx<=r.right && cy>=r.top && cy<=r.bottom) hoveredBubble=b;
+  }
+  if(hoveredBubble) hoverTone(hoveredBubble);
+
+  if(e.key==="Enter"){
+    if(hoveredBubble) popBubble(hoveredBubble);
+    else if(difficulty.penalty){ score--; updateStatus(); tone(300,0.15,0.3);}
+  }
+});
+
+function popBubble(b){
+  if(!bubbles.includes(b)) return;
+  b.remove(); bubbles=bubbles.filter(x=>x!==b); score++; updateStatus();
+
+  const now=Date.now(); lastPopTimes.push(now);
+  lastPopTimes=lastPopTimes.filter(t=>now-t<3000);
+
+  let comboTriggered=false;
+
+  if(difficulty.bonusTime){
+    if(difficulty===DIFFICULTIES.easy){timeLeft++; if(lastPopTimes.length>=3){timeLeft+=5; comboTriggered=true; lastPopTimes=[];} }
+    if(difficulty===DIFFICULTIES.medium && lastPopTimes.length>=3){timeLeft+=3; comboTriggered=true; lastPopTimes=[]; }
+  }
+  if(difficulty===DIFFICULTIES.hard && !hardBonusGranted){
+    if(lastPopTimes.length>=3 && now-hardStartTime<=30000){timeLeft+=30; hardBonusGranted=true; comboTriggered=true; lastPopTimes=[];}
+  }
+
+  if(comboTriggered) tone(450,0.12,0.3);
+  decayTone(600);
+}
+
+function endGame(){
+  clearInterval(timerInterval); clearInterval(spawnInterval);
+  state="menu"; startBtn.style.display="block";
+  instructions.style.display="block"; options.style.display="block"; difficultyButtons.style.display="none";
+
+  tone(1000, 0.6, 0.35);
+
+  speak(`Game over. Score ${score}. Click a difficulty button to play again.`);
+}
+</script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/vcd15cbe7772f49c399c6a5babf22c1241717689176015" integrity="sha512-ZpsOmlRQV6y907TI0dKBHq9Md29nnaEIPlkf84rnaERnq6zvWvPUqr2ft8M1aS28oN72PdrCzSjY4U6VaAw1EQ==" data-cf-beacon='{"version":"2024.11.0","token":"904127dc348249ba8585bea3a87cdf49","r":1,"server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>
