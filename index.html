@@ -36,7 +36,7 @@ details summary{cursor:pointer;outline:none;}
     <strong>Scoring:</strong> Each popped bubble increases your score by 1.<br><br>
     <strong>Combos:</strong> Pop 3 bubbles within the combo time window to earn extra seconds. Combo bonuses vary by difficulty.<br><br>
     <strong>Difficulty details:</strong><br>
-    <strong>Easy:</strong> 60 seconds, 5 bubbles, large size, +1s per bubble, combo bonus +3s.<br>
+    <strong>Easy:</strong> 60 seconds, 5 bubbles, large size, +1s per bubble, combo bonus +3s within 5 seconds.<br>
     <strong>Medium:</strong> 45 seconds, 3 bubbles, medium size, no per-bubble bonus, combo bonus +3s within 3 seconds.<br>
     <strong>Hard:</strong> 30 seconds, 1 bubble, small size. If you pop 5 bubbles within the initial 30 seconds, you gain +30s (once only).
   </div>
@@ -150,9 +150,9 @@ function speak(t,onEnd){
 }
 
 /* -------------------- Config -------------------- */
-const DIFFICULTIES={easy:{bubbles:5,time:60,size:100,spawn:2000,bonusTime:true,fieldScale:0.7},
-                    medium:{bubbles:3,time:45,size:80,spawn:3000,bonusTime:true,fieldScale:0.85},
-                    hard:{bubbles:1,time:30,size:60,spawn:3000,penalty:true,fieldScale:1}}; 
+const DIFFICULTIES={easy:{bubbles:5,time:60,size:100,spawn:2000,bonusTime:true,fieldScale:0.75},
+                    medium:{bubbles:3,time:45,size:80,spawn:2500,bonusTime:true,fieldScale:0.85},
+                    hard:{bubbles:1,time:30,size:60,spawn:3000,penalty:true,fieldScale:0.95}};
 
 /* -------------------- State -------------------- */
 const game=document.getElementById("game");
@@ -284,6 +284,7 @@ game.addEventListener("pointermove",e=>{
   if(nx<field.left){nx=field.left; hitBoundary=true;}
   if(nx>field.right){nx=field.right; hitBoundary=true;}
   if(ny<field.top){ny=field.top; hitBoundary=true;}
+  if (ny > field.bottom) { ny = field.bottom; hitBoundary = true;}
   cx=nx; cy=ny;
   cursor.style.left=cx+"px"; cursor.style.top=cy+"px";
   const now=Date.now();
@@ -330,14 +331,21 @@ function popBubble(b){
   if(!bubbles.includes(b)) return;
   b.remove(); bubbles=bubbles.filter(x=>x!==b); score++; updateStatus();
   const now=Date.now(); lastPopTimes.push(now);
-  lastPopTimes=lastPopTimes.filter(t=>now-t<3000);
+
+  // Remove old pops based on difficulty window
+  if(difficulty===DIFFICULTIES.easy){
+    lastPopTimes = lastPopTimes.filter(t => now - t <= 5000); // 5 seconds window for easy
+  } else {
+    lastPopTimes = lastPopTimes.filter(t => now - t <= 3000); // 3 seconds for others
+  }
+
   let comboTriggered=false;
   if(difficulty.bonusTime){
-    if(difficulty===DIFFICULTIES.easy){timeLeft++; if(lastPopTimes.length>=3){timeLeft+=3; comboTriggered=true; lastPopTimes=[];} }
+    if(difficulty===DIFFICULTIES.easy && lastPopTimes.length>=3){timeLeft+=3; comboTriggered=true; lastPopTimes=[]; }
     if(difficulty===DIFFICULTIES.medium && lastPopTimes.length>=3){timeLeft+=3; comboTriggered=true; lastPopTimes=[]; }
   }
   if(difficulty===DIFFICULTIES.hard && !hardBonusGranted){
-    // bonus is now handled in timerInterval for correct countdown behavior
+    // bonus handled in timerInterval
   }
   if(comboTriggered) tone(450,0.12,0.3);
   decayTone(600);
