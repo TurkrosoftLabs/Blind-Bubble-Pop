@@ -38,7 +38,7 @@ details summary{cursor:pointer;outline:none;}
     <strong>Difficulty details:</strong><br>
     <strong>Easy:</strong> 60 seconds, 5 bubbles, large size, +1s per bubble, combo bonus +3s.<br>
     <strong>Medium:</strong> 45 seconds, 3 bubbles, medium size, no per-bubble bonus, combo bonus +3s within 3 seconds.<br>
-    <strong>Hard:</strong> 30 seconds, 1 bubble, small size. If you pop 3 bubbles within the initial 30 seconds, you gain +30s (once only).
+    <strong>Hard:</strong> 30 seconds, 1 bubble, small size. If you pop 5 bubbles within the initial 30 seconds, you gain +30s (once only).
   </div>
 </details>
 
@@ -212,10 +212,9 @@ function countdownGo(cb){
 
 function runGame(){
   timerInterval=setInterval(()=>{
-    timeLeft--;
-    updateStatus();
-    if(timeLeft <= 10 && timeLeft > 0) tone(500);
-    if(timeLeft <= 0) endGame(); // <-- FIXED: simple check, hard bonus handled in popBubble
+    timeLeft--; updateStatus();
+    if(timeLeft<=10 && timeLeft>0) tone(500);
+    if(timeLeft<=0) endGame();
   },1000);
   for(let i=0;i<difficulty.bubbles;i++) spawnBubble();
   spawnInterval=setInterval(spawnBubble,difficulty.spawn);
@@ -314,16 +313,33 @@ document.addEventListener("keydown", e=>{
 function popBubble(b){
   if(!bubbles.includes(b)) return;
   b.remove(); bubbles=bubbles.filter(x=>x!==b); score++; updateStatus();
-  const now=Date.now(); lastPopTimes.push(now);
-  lastPopTimes=lastPopTimes.filter(t=>now-t<3000);
+  const now=Date.now(); 
+  lastPopTimes.push(now);
+
   let comboTriggered=false;
+
   if(difficulty.bonusTime){
-    if(difficulty===DIFFICULTIES.easy){timeLeft++; if(lastPopTimes.length>=3){timeLeft+=3; comboTriggered=true; lastPopTimes=[];} }
-    if(difficulty===DIFFICULTIES.medium && lastPopTimes.length>=3){timeLeft+=3; comboTriggered=true; lastPopTimes=[]; }
+    if(difficulty===DIFFICULTIES.easy){
+      timeLeft++;
+      lastPopTimes = lastPopTimes.filter(t=>now-t<3000);
+      if(lastPopTimes.length>=3){timeLeft+=3; comboTriggered=true; lastPopTimes=[];}
+    }
+    if(difficulty===DIFFICULTIES.medium){
+      lastPopTimes = lastPopTimes.filter(t=>now-t<3000);
+      if(lastPopTimes.length>=3){timeLeft+=3; comboTriggered=true; lastPopTimes=[];}
+    }
   }
+
   if(difficulty===DIFFICULTIES.hard && !hardBonusGranted){
-    if(lastPopTimes.length>=3 && now-hardStartTime<=30000){timeLeft+=30; hardBonusGranted=true; comboTriggered=true; lastPopTimes=[];}
+    // Hard mode bonus: pop 5 bubbles within first 30s
+    const popsSinceStart = lastPopTimes.filter(t => t - hardStartTime <= 30000);
+    if(popsSinceStart.length >= 5){
+      timeLeft += 30;
+      hardBonusGranted = true;
+      comboTriggered = true;
+    }
   }
+
   if(comboTriggered) tone(450,0.12,0.3);
   decayTone(600);
 }
