@@ -152,7 +152,7 @@ function speak(t,onEnd){
 /* -------------------- Config -------------------- */
 const DIFFICULTIES={easy:{bubbles:5,time:60,size:100,spawn:2000,bonusTime:true,fieldScale:0.7},
                     medium:{bubbles:3,time:45,size:80,spawn:3000,bonusTime:true,fieldScale:0.85},
-                    hard:{bubbles:1,time:30,size:60,spawn:3000,penalty:true,fieldScale:1}}; // <-- size changed to 60
+                    hard:{bubbles:1,time:30,size:60,spawn:3000,penalty:true,fieldScale:1}};
 
 /* -------------------- State -------------------- */
 const game=document.getElementById("game");
@@ -212,9 +212,10 @@ function countdownGo(cb){
 
 function runGame(){
   timerInterval=setInterval(()=>{
-    timeLeft--; updateStatus();
-    if(timeLeft<=10 && timeLeft>0) tone(500);
-    if(timeLeft<=0 && !(difficulty===DIFFICULTIES.hard && !hardBonusGranted && lastPopTimes.length>=3 && Date.now()-hardStartTime<=30000)) endGame();
+    timeLeft--;
+    updateStatus();
+    if(timeLeft <= 10 && timeLeft > 0) tone(500);
+    if(timeLeft <= 0) endGame(); // <-- FIXED: simple check, hard bonus handled in popBubble
   },1000);
   for(let i=0;i<difficulty.bubbles;i++) spawnBubble();
   spawnInterval=setInterval(spawnBubble,difficulty.spawn);
@@ -291,7 +292,7 @@ game.addEventListener("pointermove",e=>{
 
 document.addEventListener("keydown", e=>{
   if(state!=="playing") return;
-  const field=getField(); const step=40; // <-- keyboard step increased from 30 to 40
+  const field=getField(); const step=40;
   let nx=cx, ny=cy;
   if(e.key==="ArrowUp") ny-=step;
   if(e.key==="ArrowDown") ny+=step;
