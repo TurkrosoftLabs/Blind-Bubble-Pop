@@ -36,9 +36,9 @@ details summary{cursor:pointer;outline:none;}
     <strong>Scoring:</strong> Each popped bubble increases your score by 1.<br><br>
     <strong>Combos:</strong> Pop 3 bubbles within the combo time window to earn extra seconds. Combo bonuses vary by difficulty.<br><br>
     <strong>Difficulty details:</strong><br>
-    <strong>Easy:</strong> 60 seconds, 5 bubbles, large size, +1s per bubble, combo bonus +5s.<br>
+    <strong>Easy:</strong> 60 seconds, 5 bubbles, large size, +1s per bubble, combo bonus +3s.<br>
     <strong>Medium:</strong> 45 seconds, 3 bubbles, medium size, no per-bubble bonus, combo bonus +3s within 3 seconds.<br>
-    <strong>Hard:</strong> 30 seconds, 1 bubble, small size, no per-bubble bonus. If you pop 3 bubbles within the initial 30 seconds, you gain +30s (once only).
+    <strong>Hard:</strong> 30 seconds, 1 bubble, small size. If you pop 3 bubbles within the initial 30 seconds, you gain +30s (once only).
   </div>
 </details>
 
@@ -72,26 +72,18 @@ function tone(freq,dur=0.1,gain=0.25){
   o.start(); o.stop(audioCtx.currentTime+dur);
 }
 
-/* -------------------- Pop Tone: Version 1 Timbre + Version 2 Envelope -------------------- */
 function decayTone(freq,dur=0.1){
   if(!audioUnlocked) return;
-
-  // Timbre from Version 1 (“O” formant)
   const real = new Float32Array([0, 1.2, 0.03, 0.02, 0.01]);
   const imag = new Float32Array(real.length);
   const wave = audioCtx.createPeriodicWave(real, imag, {disableNormalization:false});
-
   const o = audioCtx.createOscillator();
   const g = audioCtx.createGain();
-
   o.setPeriodicWave(wave);
   o.frequency.value = freq;
-
-  // Envelope from Version 2 (fast attack, sudden pop)
   g.gain.setValueAtTime(0.1, audioCtx.currentTime);
   g.gain.linearRampToValueAtTime(0.95, audioCtx.currentTime + 0.001);
   g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
-
   o.connect(g); g.connect(audioCtx.destination);
   o.start(audioCtx.currentTime);
   o.stop(audioCtx.currentTime + dur);
@@ -110,28 +102,24 @@ function wallTone(freq=150, dur=0.04, gain=0.65){
   o.stop(audioCtx.currentTime + dur);
 }
 
-/* -------------------- Hover Tone With Movement Sensitivity -------------------- */
+/* -------------------- Hover Tone -------------------- */
 const BUBBLE_HOVER_COOLDOWN=30;
 const hoverState = new WeakMap();
 
 function hoverTone(bubble){
   if(!audioUnlocked) return;
   const now = audioCtx.currentTime;
-
   let state = hoverState.get(bubble);
   if(!state){
     state = {gain:0, lastMove:now};
     hoverState.set(bubble, state);
   }
-
   const o = audioCtx.createOscillator();
   const g = audioCtx.createGain();
   const lfo = audioCtx.createOscillator();
   const lfoGain = audioCtx.createGain();
-
   o.type = 'sine';
   o.frequency.value = 600;
-
   lfo.type = 'sine';
   lfo.frequency.value = 3 + Math.random()*3;
   lfoGain.gain.value = 5;
@@ -139,20 +127,14 @@ function hoverTone(bubble){
   lfoGain.connect(o.frequency);
   lfo.start(now);
   lfo.stop(now + 0.25);
-
   const deltaTime = now - state.lastMove;
   let targetGain = 0.12;
-  if(deltaTime < 0.05){
-    state.gain = Math.min(state.gain + 0.02, targetGain);
-  }
-
+  if(deltaTime < 0.05){ state.gain = Math.min(state.gain + 0.02, targetGain);}
   g.gain.setValueAtTime(0.0001, now);
   g.gain.linearRampToValueAtTime(state.gain, now + 0.05);
   g.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
-
   o.connect(g); g.connect(audioCtx.destination);
   o.start(now); o.stop(now + 0.25);
-
   state.lastMove = now;
   hoverState.set(bubble, state);
 }
@@ -168,7 +150,9 @@ function speak(t,onEnd){
 }
 
 /* -------------------- Config -------------------- */
-const DIFFICULTIES={easy:{bubbles:5,time:60,size:100,spawn:2000,bonusTime:true,fieldScale:0.8},medium:{bubbles:3,time:45,size:80,spawn:3000,bonusTime:true,fieldScale:1},hard:{bubbles:1,time:30,size:50,spawn:5000,penalty:true,fieldScale:1}};
+const DIFFICULTIES={easy:{bubbles:5,time:60,size:100,spawn:2000,bonusTime:true,fieldScale:0.7},
+                    medium:{bubbles:3,time:45,size:80,spawn:3000,bonusTime:true,fieldScale:0.85},
+                    hard:{bubbles:1,time:30,size:60,spawn:3000,penalty:true,fieldScale:1}}; // <-- size changed to 60
 
 /* -------------------- State -------------------- */
 const game=document.getElementById("game");
@@ -182,8 +166,8 @@ const difficultyButtons=document.getElementById("difficultyButtons");
 let bubbles=[],score=0,timeLeft=0,difficulty;
 let timerInterval,spawnInterval;
 let hoveredBubble=null;
-let state="menu",cx=0,cy=0,lastPopTimes=[];
-let hardBonusGranted=false;
+let state="menu",cx=0,cy=0,lastPopTimes=[]; 
+let hardBonusGranted=false; 
 let hardStartTime=0;
 let touchStartX=0,touchStartY=0;
 const TAP_SLOP=12;
@@ -230,7 +214,7 @@ function runGame(){
   timerInterval=setInterval(()=>{
     timeLeft--; updateStatus();
     if(timeLeft<=10 && timeLeft>0) tone(500);
-    if(timeLeft<=0) endGame();
+    if(timeLeft<=0 && !(difficulty===DIFFICULTIES.hard && !hardBonusGranted && lastPopTimes.length>=3 && Date.now()-hardStartTime<=30000)) endGame();
   },1000);
   for(let i=0;i<difficulty.bubbles;i++) spawnBubble();
   spawnInterval=setInterval(spawnBubble,difficulty.spawn);
@@ -278,26 +262,20 @@ game.addEventListener("pointerdown",e=>{
 
 game.addEventListener("pointermove",e=>{
   if(state!=="playing") return;
-
   const field=getField();
   let nx=e.clientX, ny=e.clientY;
   let hitBoundary=false;
-
   if(nx<field.left){nx=field.left; hitBoundary=true;}
   if(nx>field.right){nx=field.right; hitBoundary=true;}
   if(ny<field.top){ny=field.top; hitBoundary=true;}
-
   cx=nx; cy=ny;
   cursor.style.left=cx+"px"; cursor.style.top=cy+"px";
-
   const now=Date.now();
-
   if(hitBoundary && now-lastEdgeTime>EDGE_COOLDOWN){
     lastEdgeTime=now;
     wallTone(150, 0.04, 0.65);
     if(navigator.vibrate) navigator.vibrate(40);
   }
-
   hoveredBubble=null;
   for(const b of bubbles){
     const last=bubbleHoverTimes.get(b)||0;
@@ -313,7 +291,7 @@ game.addEventListener("pointermove",e=>{
 
 document.addEventListener("keydown", e=>{
   if(state!=="playing") return;
-  const field=getField(); const step=20;
+  const field=getField(); const step=40; // <-- keyboard step increased from 30 to 40
   let nx=cx, ny=cy;
   if(e.key==="ArrowUp") ny-=step;
   if(e.key==="ArrowDown") ny+=step;
@@ -321,13 +299,11 @@ document.addEventListener("keydown", e=>{
   if(e.key==="ArrowRight") nx+=step;
   if(nx<field.left||nx>field.right||ny<field.top||ny>field.bottom){wallTone(150, 0.04, 0.65); return;}
   cx=nx; cy=ny; cursor.style.left=cx+"px"; cursor.style.top=cy+"px";
-
   hoveredBubble=null;
   for(const b of bubbles){ const r=b.getBoundingClientRect();
     if(cx>=r.left && cx<=r.right && cy>=r.top && cy<=r.bottom) hoveredBubble=b;
   }
   if(hoveredBubble) hoverTone(hoveredBubble);
-
   if(e.key==="Enter"){
     if(hoveredBubble) popBubble(hoveredBubble);
     else if(difficulty.penalty){ score--; updateStatus(); tone(300,0.15,0.3);}
@@ -337,20 +313,16 @@ document.addEventListener("keydown", e=>{
 function popBubble(b){
   if(!bubbles.includes(b)) return;
   b.remove(); bubbles=bubbles.filter(x=>x!==b); score++; updateStatus();
-
   const now=Date.now(); lastPopTimes.push(now);
   lastPopTimes=lastPopTimes.filter(t=>now-t<3000);
-
   let comboTriggered=false;
-
   if(difficulty.bonusTime){
-    if(difficulty===DIFFICULTIES.easy){timeLeft++; if(lastPopTimes.length>=3){timeLeft+=5; comboTriggered=true; lastPopTimes=[];} }
+    if(difficulty===DIFFICULTIES.easy){timeLeft++; if(lastPopTimes.length>=3){timeLeft+=3; comboTriggered=true; lastPopTimes=[];} }
     if(difficulty===DIFFICULTIES.medium && lastPopTimes.length>=3){timeLeft+=3; comboTriggered=true; lastPopTimes=[]; }
   }
   if(difficulty===DIFFICULTIES.hard && !hardBonusGranted){
     if(lastPopTimes.length>=3 && now-hardStartTime<=30000){timeLeft+=30; hardBonusGranted=true; comboTriggered=true; lastPopTimes=[];}
   }
-
   if(comboTriggered) tone(450,0.12,0.3);
   decayTone(600);
 }
@@ -359,12 +331,9 @@ function endGame(){
   clearInterval(timerInterval); clearInterval(spawnInterval);
   state="menu"; startBtn.style.display="block";
   instructions.style.display="block"; options.style.display="block"; difficultyButtons.style.display="none";
-
   tone(1000, 0.6, 0.35);
-
   speak(`Game over. Score ${score}. Click a difficulty button to play again.`);
 }
 </script>
-<script defer src="https://static.cloudflareinsights.com/beacon.min.js/vcd15cbe7772f49c399c6a5babf22c1241717689176015" integrity="sha512-ZpsOmlRQV6y907TI0dKBHq9Md29nnaEIPlkf84rnaERnq6zvWvPUqr2ft8M1aS28oN72PdrCzSjY4U6VaAw1EQ==" data-cf-beacon='{"version":"2024.11.0","token":"904127dc348249ba8585bea3a87cdf49","r":1,"server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>
