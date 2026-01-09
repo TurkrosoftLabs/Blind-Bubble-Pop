@@ -169,6 +169,7 @@ let hoveredBubble=null;
 let state="menu",cx=0,cy=0,lastPopTimes=[]; 
 let hardBonusGranted=false; 
 let hardStartTime=0;
+let hardPopCount=0;
 let touchStartX=0,touchStartY=0;
 const TAP_SLOP=12;
 
@@ -195,7 +196,7 @@ startBtn.onclick=()=>{
 function startGame(level){
   state="playing"; difficulty=DIFFICULTIES[level];
   bubbles=[]; score=0; timeLeft=difficulty.time; lastPopTimes=[];
-  hardBonusGranted=false; hardStartTime=Date.now();
+  hardBonusGranted=false; hardStartTime=Date.now(); hardPopCount=0;
   difficultyButtons.style.display="none"; instructions.style.display="none"; options.style.display="none";
   game.innerHTML=""; game.appendChild(cursor);
   const field=getField();
@@ -217,11 +218,8 @@ function runGame(){
 
     if(timeLeft <= 10 && timeLeft > 0) tone(500);
 
-    // Hard bonus: add 30s if 5 bubbles popped within first 30s
     if(difficulty === DIFFICULTIES.hard && !hardBonusGranted){
-      const now = Date.now();
-      const popsSinceStart = lastPopTimes.filter(t => now - t <= 30000);
-      if(popsSinceStart.length >= 5){
+      if(hardPopCount >= 5){
         timeLeft += 30;
         hardBonusGranted = true;
         tone(450, 0.12, 0.3);
@@ -332,11 +330,14 @@ function popBubble(b){
   b.remove(); bubbles=bubbles.filter(x=>x!==b); score++; updateStatus();
   const now=Date.now(); lastPopTimes.push(now);
 
-  // Remove old pops based on difficulty window
+  if(difficulty === DIFFICULTIES.hard && !hardBonusGranted && now - hardStartTime <= 30000){
+    hardPopCount++;
+  }
+
   if(difficulty===DIFFICULTIES.easy){
-    lastPopTimes = lastPopTimes.filter(t => now - t <= 5000); // 5 seconds window for easy
+    lastPopTimes = lastPopTimes.filter(t => now - t <= 5000);
   } else {
-    lastPopTimes = lastPopTimes.filter(t => now - t <= 3000); // 3 seconds for others
+    lastPopTimes = lastPopTimes.filter(t => now - t <= 3000);
   }
 
   let comboTriggered=false;
