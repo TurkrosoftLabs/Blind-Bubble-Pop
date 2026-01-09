@@ -201,6 +201,8 @@ const options=document.getElementById("options");
 const difficultyButtons=document.getElementById("difficultyButtons");
 
 let bubbles=[],score=0,timeLeft=0,difficulty;
+let restartCooldown = false;
+const RESTART_COOLDOWN_MS = 1000; // 1-second cooldown
 let timerInterval,spawnInterval;
 let hoveredBubble=null;
 let state="menu",cx=0,cy=0,lastPopTimes=[]; 
@@ -231,16 +233,31 @@ startBtn.onclick=()=>{
 };
 
 function startGame(level){
-  state="playing"; difficulty=DIFFICULTIES[level];
-  bubbles=[]; score=0; timeLeft=difficulty.time; lastPopTimes=[];
-  hardBonusGranted=false; hardStartTime=Date.now(); hardPopCount=0;
-  difficultyButtons.style.display="none"; instructions.style.display="none"; options.style.display="none";
+  if(restartCooldown) return; // ignore clicks during cooldown
+
+  state="playing";
+  difficulty = DIFFICULTIES[level];
+  bubbles = [];
+  score = 0;
+  timeLeft = difficulty.time;
+  lastPopTimes = [];
+  hardBonusGranted = false;
+  hardStartTime = Date.now();
+  hardPopCount = 0;
+
+  difficultyButtons.style.display="none";
+  instructions.style.display="none";
+  options.style.display="none";
   game.innerHTML=""; game.appendChild(cursor);
-  const field=getField();
-  cx=(field.left+field.right)/2; cy=(field.top+field.bottom)/2;
-  cursor.style.left=cx+"px"; cursor.style.top=cy+"px";
+
+  const field = getField();
+  cx = (field.left + field.right)/2;
+  cy = (field.top + field.bottom)/2;
+  cursor.style.left = cx + "px";
+  cursor.style.top = cy + "px";
+
   updateStatus();
-  speak(level+" mode",()=>countdownGo(runGame));
+  speak(level+" mode", ()=>countdownGo(runGame));
 }
 
 function countdownGo(cb){
@@ -391,11 +408,22 @@ function popBubble(b){
 }
 
 function endGame(){
-  clearInterval(timerInterval); clearInterval(spawnInterval);
-  state="menu"; startBtn.style.display="block";
-  instructions.style.display="block"; options.style.display="block"; difficultyButtons.style.display="none";
+  clearInterval(timerInterval);
+  clearInterval(spawnInterval);
+
+  state = "menu";
+
+  startBtn.style.display = "block";
+  instructions.style.display = "block";
+  options.style.display = "block";
+  difficultyButtons.style.display = "none";
+
   tone(1000, 0.6, 0.35);
   speak(`Game over. Score ${score}. Click a difficulty button to play again.`);
+
+  // --- START COOLDOWN ---
+  restartCooldown = true;
+  setTimeout(() => { restartCooldown = false; }, RESTART_COOLDOWN_MS);
 }
 </script>
 </body>
