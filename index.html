@@ -46,8 +46,9 @@ details summary{cursor:pointer;outline:none;}
   <summary>Options</summary>
   <div>
     <label><input type="checkbox" id="toggleAudio" checked> Audio</label><br>
-    <label><input type="checkbox" id="toggleVisuals" checked> Visuals</label><br>
-    <label><input type="checkbox" id="toggleHaptics" checked> Haptics</label>
+    <label><input type="checkbox" id="toggleVisuals"> Visuals</label><br>
+    <label><input type="checkbox" id="toggleHaptics" checked> Haptics</label><br>
+    <label><input type="checkbox" id="toggleSpeech" checked> Speech</label>
   </div>
 </details>
 
@@ -64,7 +65,7 @@ let audioUnlocked=false;
 function unlockAudio(){if(!audioUnlocked){audioCtx.resume();audioUnlocked=true;}}
 
 function tone(freq,dur=0.1,gain=0.25){
-  if(!audioUnlocked) return;
+  if(!audioUnlocked || !document.getElementById("toggleAudio").checked) return;
   const o=audioCtx.createOscillator();
   const g=audioCtx.createGain();
   o.frequency.value=freq; g.gain.value=gain;
@@ -73,7 +74,7 @@ function tone(freq,dur=0.1,gain=0.25){
 }
 
 function decayTone(freq,dur=0.1){
-  if(!audioUnlocked) return;
+  if(!audioUnlocked || !document.getElementById("toggleAudio").checked) return;
   const real = new Float32Array([0, 1.2, 0.03, 0.02, 0.01]);
   const imag = new Float32Array(real.length);
   const wave = audioCtx.createPeriodicWave(real, imag, {disableNormalization:false});
@@ -90,7 +91,7 @@ function decayTone(freq,dur=0.1){
 }
 
 function wallTone(freq=150, dur=0.04, gain=0.65){
-  if(!audioUnlocked) return;
+  if(!audioUnlocked || !document.getElementById("toggleAudio").checked) return;
   const o = audioCtx.createOscillator();
   const g = audioCtx.createGain();
   o.type = 'square';
@@ -142,11 +143,47 @@ function hoverTone(bubble){
 /* -------------------- Speech -------------------- */
 const speechOverlay=document.getElementById("speechOverlay");
 function speak(t,onEnd){
+  if(!("speechSynthesis" in window)){
+    if(onEnd) setTimeout(onEnd, 0);
+    return;
+  }
+
+  const speechToggle = document.getElementById("toggleSpeech");
+  if(!speechToggle.checked){
+    speechSynthesis.cancel();
+    speechOverlay.textContent = "";
+    if(onEnd) setTimeout(onEnd, 0);
+    return;
+  }
+
   speechSynthesis.cancel();
-  const u=new SpeechSynthesisUtterance(t);
-  if(onEnd) u.onend=onEnd;
+  const u = new SpeechSynthesisUtterance(t);
+
+  let started = false;
+  const failTimer = setTimeout(() => {
+    if(!started){
+      // Speech is blocked — auto-disable
+      speechToggle.checked = false;
+      speechSynthesis.cancel();
+      speechOverlay.textContent = "";
+      if(onEnd) onEnd();
+    }
+  }, 300);
+
+  u.onstart = () => {
+    started = true;
+    clearTimeout(failTimer);
+  };
+
+  if(onEnd){
+    u.onend = () => {
+      clearTimeout(failTimer);
+      onEnd();
+    };
+  }
+
   speechSynthesis.speak(u);
-  speechOverlay.textContent=t;
+  speechOverlay.textContent = t;
 }
 
 /* -------------------- Config -------------------- */
@@ -241,6 +278,7 @@ function spawnBubble(){
   b.className="bubble"; b.style.width=b.style.height=size+"px";
   b.style.left=(field.left+Math.random()*(field.right-field.left-size))+"px";
   b.style.top=(field.top+Math.random()*(field.bottom-field.top-size))+"px";
+  if(!document.getElementById("toggleVisuals").checked) b.style.background="transparent";
   game.appendChild(b); bubbles.push(b);
 }
 
